@@ -1,0 +1,6 @@
+asyncio
+websockets 
+simpleobsws
+ariadne
+uvicorn
+starlette

@@ -1,0 +1,17 @@
+version: "3"
+
+services:
+  python:
+    container_name: obs-sss
+    build: .
+    env_file: python.env
+    volumes:
+      - ./app:/app
+    ports:
+      - "8000:8000"
+    networks:
+      netone:
+
+networks:
+  netone:
+    external: true
