@@ -1,10 +1,16 @@
 #!/usr/bin/env python
 import os
-import asyncio, json
+import asyncio, json, base64, binascii
 import simpleobsws
 from ariadne import QueryType, ObjectType, gql, make_executable_schema
 from ariadne.asgi import GraphQL
 from starlette.applications import Starlette
+from starlette.authentication import (
+    AuthCredentials, AuthenticationBackend, AuthenticationError, SimpleUser
+)
+from starlette.middleware import Middleware
+from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.responses import PlainTextResponse
 from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
 
@@ -24,6 +30,27 @@ async def startup():
 async def shutdown():
     global GLOBAL_WS_SESSION
     await GLOBAL_WS_SESSION.close()
+
+
+
+######## Auth functions
+class BasicAuthBackend(AuthenticationBackend):
+    async def authenticate(self, conn):
+        if "Authorization" not in conn.headers:
+            return
+
+        auth = conn.headers["Authorization"]
+        try:
+            scheme, credentials = auth.split()
+            if scheme.lower() != 'basic':
+                return
+            decoded = base64.b64decode(credentials).decode("ascii")
+        except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+            raise AuthenticationError('Invalid basic auth credentials')
+
+        username, _, password = decoded.partition(":")
+        if username == os.environ['API_USER'] and password == os.environ['API_PASS']:
+            return AuthCredentials(["authenticated"]), SimpleUser(username)
 
 
 
@@ -83,6 +110,8 @@ async def resolve_hello(_, info):
 
 @query.field("run")
 async def resolve_run(_, info):
+    if not info.context["request"].user.is_authenticated:
+        return 1
     await test_function()
     return 0
 
@@ -103,4 +132,7 @@ routes = [
     Mount('/api/v1', GraphQL(schema)),
     Mount('', app=StaticFiles(directory='.', html=True))
 ]
-app = Starlette(routes=routes, debug=True, on_startup=[startup], on_shutdown=[shutdown])
+middleware = [
+    Middleware(AuthenticationMiddleware, backend=BasicAuthBackend())
+]
+app = Starlette(debug=True, routes=routes, middleware=middleware, on_startup=[startup], on_shutdown=[shutdown])
