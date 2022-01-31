@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import os
 import asyncio, json, base64, binascii
-import simpleobsws
+from simpleobsws import WebSocketClient
+from simpleobsws import Request as sRequest
 from ariadne import QueryType, ObjectType, gql, make_executable_schema
 from ariadne.asgi import GraphQL
 from starlette.applications import Starlette
@@ -31,7 +32,6 @@ async def startup():
         print('Error: Could not make websocket connection to:', os.environ['WS_TARGET_URI'])
 
 async def shutdown():
-    global GLOBAL_WS_SESSION
     await GLOBAL_WS_SESSION.close()
 
 
@@ -58,36 +58,16 @@ class BasicAuthBackend(AuthenticationBackend):
 
 
 ######## Cool functions
-class WSSession():
-    def __init__(self, uri, password):
-        self.uri = uri
-        self.password = password
-
-        self.ws = simpleobsws.WebSocketClient(uri, password)
-    
+class WSSession(WebSocketClient):
     async def open(self):
-        await self.ws.connect()
-        await self.ws.wait_until_identified()
+        await self.connect()
+        await self.wait_until_identified()
 
     async def close(self):
-        await self.ws.disconnect()
+        await self.disconnect()
 
-    def getRawSession(self):
-        return self.ws
-
-
-
-async def test_function():
-    ws = GLOBAL_WS_SESSION.getRawSession()
-
-    #response = await ws.call(simpleobsws.Request('GetSceneList'))
-    #print(response)
-
-    for i in range(2):
-        await ws.call(simpleobsws.Request('SetCurrentProgramScene', {'sceneName': 'testScene'}))
-        await asyncio.sleep(1)
-        await ws.call(simpleobsws.Request('SetCurrentProgramScene', {'sceneName': 'Scene'}))
-        await asyncio.sleep(1)
+    async def setCurrentScene(self, name):
+        await self.call(sRequest('SetCurrentProgramScene', {'sceneName': name}))
 
 
 
@@ -115,7 +95,7 @@ async def resolve_hello(_, info):
 async def resolve_run(_, info):
     if not info.context["request"].user.is_authenticated:
         return 1
-    await test_function()
+    await GLOBAL_WS_SESSION.setCurrentScene("testScene")
     return 0
 
 @query.field("test")
