@@ -23,9 +23,12 @@ GLOBAL_WS_SESSION = None
 
 ######## Startup and shutdown functions
 async def startup():
-    global GLOBAL_WS_SESSION
-    GLOBAL_WS_SESSION = WSSession(os.environ['WS_TARGET_URI'], os.environ['WS_TARGET_PASS'])
-    await GLOBAL_WS_SESSION.open()
+    try:
+        global GLOBAL_WS_SESSION
+        GLOBAL_WS_SESSION = WSSession(os.environ['WS_TARGET_URI'], os.environ['WS_TARGET_PASS'])
+        await GLOBAL_WS_SESSION.open()
+    except (asyncio.exceptions.TimeoutError) as e:
+        print('Error: Could not make websocket connection to:', os.environ['WS_TARGET_URI'])
 
 async def shutdown():
     global GLOBAL_WS_SESSION
@@ -129,8 +132,8 @@ async def resolve_eeee(obj, *_):
 ######## Create executable schema instance
 schema = make_executable_schema(type_defs, query, test)
 routes = [
-    Mount('/api/v1', GraphQL(schema)),
-    Mount('', app=StaticFiles(directory='.', html=True))
+    Mount('/graphql', GraphQL(schema)),
+    Mount('/', app=StaticFiles(directory='.', html=True))
 ]
 middleware = [
     Middleware(AuthenticationMiddleware, backend=BasicAuthBackend())
