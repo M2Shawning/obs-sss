@@ -10,8 +10,7 @@ services:
     ports:
       - "8000:8000"
     networks:
-      netone:
+      obs-sss:
 
 networks:
-  netone:
-    external: true
+  obs-sss:
