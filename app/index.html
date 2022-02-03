@@ -7,17 +7,45 @@
     <title>Document</title>
 </head>
 <body>
+    <button id="reconnectAllWS" onclick=reconnectAllWS()>Reconnect All WS Sessions</button>
+    <form id="loginForm">  
+        Username: <input id="username" type="text" name="username"/> <br/>
+        Password:  <input id="password" type="password" name="password"/> <br/>
+        <input id="submit" type="submit" value="Submit">
+     </form>  
 </body>
 <script language="javascript">
-    fetch('/graphql/', {
-    method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-        },
-        body: JSON.stringify({query: "{ test { eeee } }"})
-    })
-        .then(r => r.json())
-        .then(data => document.write(data.data.test.eeee));
+    let loginForm =  document.querySelector('#loginForm');
+    loginForm.addEventListener('submit', event => {
+        event.preventDefault();
+
+        let username = document.querySelector('#username');
+        let password = document.querySelector('#password');
+
+        encodedAuth = btoa(username.value + ":" + password.value);
+        username.value = "";
+        password.value = "";
+
+        document.cookie = "obs_sssAuth=" + encodedAuth + "; max-age=3600; path=/; SameSite=Strict; Secure;";
+    });
+
+    function getAuthCookie() {
+        return document.cookie
+            .split('; ')
+            .find(row => row.startsWith('obs_sssAuth='))
+            .split('=')[1];
+    }
+
+    function reconnectAllWS() {
+        fetch('/graphql/', {
+        method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': 'basic ' + getAuthCookie(),
+            },
+            body: JSON.stringify({query: "mutation { reconnectAllWS }"})
+        })
+    }
 </script>
 </html>
