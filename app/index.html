@@ -12,7 +12,8 @@
         Username: <input id="username" type="text" name="username"/> <br/>
         Password:  <input id="password" type="password" name="password"/> <br/>
         <input id="submit" type="submit" value="Submit">
-     </form>  
+     </form>
+     <div id="firstDiv" \>
 </body>
 <script language="javascript">
     let loginForm =  document.querySelector('#loginForm');
@@ -29,11 +30,58 @@
         document.cookie = "obs_sssAuth=" + encodedAuth + "; max-age=3600; path=/; SameSite=Strict; Secure;";
     });
 
+    makeShowButtons()
+
     function getAuthCookie() {
         return document.cookie
             .split('; ')
             .find(row => row.startsWith('obs_sssAuth='))
             .split('=')[1];
+    }
+
+    function makeShowButtons() {
+        fetch('/graphql/', {
+        method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': 'basic ' + getAuthCookie(),
+            },
+            body: JSON.stringify({query: "query { getShowNames }"})
+        })
+            .then(r => r.json())
+            .then(data => {
+                showNamesList = data.data.getShowNames;
+
+                console.log(showNamesList)
+                let newDiv = document.createElement("div");
+                for (let i = 0; i < showNamesList.length; i++) {
+                    let item = showNamesList[i];
+
+                    let element = document.createElement("button")
+                    element.setAttribute("id", item)
+                    element.setAttribute("onclick", "runShow(this)")
+                    let text = document.createTextNode(item);
+                    element.appendChild(text)
+                    
+                    newDiv.appendChild(element)
+                }
+
+                const currentDiv = document.getElementById("firstDiv");
+                document.body.insertBefore(newDiv, currentDiv);
+            });
+    }
+
+    function runShow(element) {
+        fetch('/graphql/', {
+        method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': 'basic ' + getAuthCookie(),
+            },
+            body: JSON.stringify({query: "mutation { executeShow (showName: \"" + element.id + "\") }"})
+        })
     }
 
     function reconnectAllWS() {
