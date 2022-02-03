@@ -19,6 +19,7 @@ from starlette.staticfiles import StaticFiles
 
 ######## Global vars
 GLOBAL_WS_SESSION_DICT = {}
+GLOBAL_OBS_SHOW_DICT = {}
 
 
 
@@ -26,10 +27,32 @@ GLOBAL_WS_SESSION_DICT = {}
 async def startup():
         wsTargetList = json.loads(os.environ['WS_TARGET_LIST'])
         await asyncio.gather(*map(openWSSession, wsTargetList))
+        await createOBSShows()
 
 async def shutdown():
     for ws in GLOBAL_WS_SESSION_DICT.values():
         await ws.close()
+
+async def openWSSession(wsTarget):
+    global GLOBAL_WS_SESSION_DICT
+    try:
+        hostName = wsTarget['hostName']
+        ws = WSSession(wsTarget['url'], wsTarget['password'])
+        await ws.open()
+        if hostName in GLOBAL_WS_SESSION_DICT:
+            GLOBAL_WS_SESSION_DICT[hostName].close()
+        GLOBAL_WS_SESSION_DICT[hostName] = ws
+    except (asyncio.exceptions.TimeoutError) as e:
+        print('Error: Could not make websocket connection to:', hostName)
+
+async def createOBSShows():
+    global GLOBAL_OBS_SHOW_DICT
+    obsShowList = json.loads(os.environ['OBS_SHOW_LIST'])
+    for rawOBSShow in obsShowList:
+        obsShow = OBSShow()
+        for rawOBSState in rawOBSShow['obsStateList']:
+            obsShow.add(OBSState(rawOBSState['hostName'], rawOBSState['sceneName']))
+        GLOBAL_OBS_SHOW_DICT[rawOBSShow['showName']] = obsShow
 
 
 
@@ -63,23 +86,30 @@ class WSSession(WebSocketClient):
     async def close(self):
         await self.disconnect()
 
-    def getURL(self):
+    async def getURL(self):
         return self.url
 
     async def setCurrentScene(self, name):
         await self.call(sRequest('SetCurrentProgramScene', {'sceneName': name}))
 
-async def openWSSession(wsTarget):
-    global GLOBAL_WS_SESSION_DICT
-    try:
-        hostName = wsTarget['hostName']
-        ws = WSSession(wsTarget['url'], wsTarget['password'])
-        await ws.open()
-        if hostName in GLOBAL_WS_SESSION_DICT:
-            GLOBAL_WS_SESSION_DICT[hostName].close()
-        GLOBAL_WS_SESSION_DICT[hostName] = ws
-    except (asyncio.exceptions.TimeoutError) as e:
-        print('Error: Could not make websocket connection to:', hostName)
+class OBSState():
+    def __init__(self, hostName, sceneName):
+        self.hostName = hostName
+        self.sceneName = sceneName
+
+class OBSShow():
+    def __init__(self):
+        self.obsStateList = []
+
+    def add(self, obsState):
+        self.obsStateList.append(obsState)
+    
+    async def execute(self):
+        for obsState in self.obsStateList:
+            if obsState.hostName in GLOBAL_WS_SESSION_DICT:
+                await GLOBAL_WS_SESSION_DICT[obsState.hostName].setCurrentScene(obsState.sceneName)
+            else:
+                print('Error: Could not execute on', obsState.hostName, 'as one of the configured key values doesn\'t exist')
 
 
 
@@ -91,6 +121,7 @@ type_defs = gql("""
 
     type Mutation {
         setCurrentScene(hostName: String!, sceneName: String!): Boolean!
+        executeShow(showName: String!): Boolean!
     }
 """)
 
@@ -110,6 +141,19 @@ async def resolve_setCurrentScene(_, info, hostName, sceneName):
         await GLOBAL_WS_SESSION_DICT[hostName].setCurrentScene(sceneName)
     except Exception as e:
         print("Error: Could not set scene", sceneName, "on host", hostName)
+        logging.error(traceback.format_exc())
+        print(e)
+        return 1
+    return 0
+
+@mutation.field("executeShow")
+async def resolve_executeShow(_, info, showName):
+    if not info.context["request"].user.is_authenticated:
+        return 1
+    try:
+        await GLOBAL_OBS_SHOW_DICT[showName].execute()
+    except Exception as e:
+        print("Error: Could not execute show", showName)
         logging.error(traceback.format_exc())
         print(e)
         return 1
