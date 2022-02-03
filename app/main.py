@@ -40,7 +40,7 @@ async def openWSSession(wsTarget):
         ws = WSSession(wsTarget['url'], wsTarget['password'])
         await ws.open()
         if hostName in GLOBAL_WS_SESSION_DICT:
-            GLOBAL_WS_SESSION_DICT[hostName].close()
+            await GLOBAL_WS_SESSION_DICT[hostName].close()
         GLOBAL_WS_SESSION_DICT[hostName] = ws
     except (asyncio.exceptions.TimeoutError) as e:
         print('Error: Could not make websocket connection to:', hostName)
@@ -117,11 +117,13 @@ class OBSShow():
 type_defs = gql("""
     type Query {
         hello: String!
+        getShowNames: [String]!
     }
 
     type Mutation {
         setCurrentScene(hostName: String!, sceneName: String!): Boolean!
         executeShow(showName: String!): Boolean!
+        reconnectAllWS: Boolean!
     }
 """)
 
@@ -131,6 +133,13 @@ async def resolve_hello(_, info):
     request = info.context["request"]
     user_agent = request.headers.get("user-agent", "guest")
     return "Hello, %s!" % user_agent
+
+@query.field("getShowNames")
+async def resolve_getShowNames(_, info):
+    if not info.context["request"].user.is_authenticated:
+        return "Invalid authentication"
+    global GLOBAL_OBS_SHOW_DICT
+    return list(GLOBAL_OBS_SHOW_DICT.keys())
 
 mutation = MutationType()
 @mutation.field("setCurrentScene")
@@ -157,6 +166,14 @@ async def resolve_executeShow(_, info, showName):
         logging.error(traceback.format_exc())
         print(e)
         return 1
+    return 0
+
+@mutation.field("reconnectAllWS")
+async def resolve_executeShow(_, info):
+    if not info.context["request"].user.is_authenticated:
+        return 1
+    wsTargetList = json.loads(os.environ['WS_TARGET_LIST'])
+    await asyncio.gather(*map(openWSSession, wsTargetList))
     return 0
 
 
