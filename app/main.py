@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-import os
+import os, logging, traceback
 import asyncio, json, base64, binascii
 from simpleobsws import WebSocketClient
 from simpleobsws import Request as sRequest
-from ariadne import QueryType, ObjectType, gql, make_executable_schema
+from ariadne import QueryType, MutationType, ObjectType, gql, make_executable_schema
 from ariadne.asgi import GraphQL
 from starlette.applications import Starlette
 from starlette.authentication import (
@@ -18,21 +18,18 @@ from starlette.staticfiles import StaticFiles
 
 
 ######## Global vars
-GLOBAL_WS_SESSION = None
+GLOBAL_WS_SESSION_DICT = {}
 
 
 
 ######## Startup and shutdown functions
 async def startup():
-    try:
-        global GLOBAL_WS_SESSION
-        GLOBAL_WS_SESSION = WSSession(os.environ['WS_TARGET_URI'], os.environ['WS_TARGET_PASS'])
-        await GLOBAL_WS_SESSION.open()
-    except (asyncio.exceptions.TimeoutError) as e:
-        print('Error: Could not make websocket connection to:', os.environ['WS_TARGET_URI'])
+        wsTargetList = json.loads(os.environ['WS_TARGET_LIST'])
+        await asyncio.gather(*map(openWSSession, wsTargetList))
 
 async def shutdown():
-    await GLOBAL_WS_SESSION.close()
+    for ws in GLOBAL_WS_SESSION_DICT.values():
+        await ws.close()
 
 
 
@@ -66,8 +63,23 @@ class WSSession(WebSocketClient):
     async def close(self):
         await self.disconnect()
 
+    def getURL(self):
+        return self.url
+
     async def setCurrentScene(self, name):
         await self.call(sRequest('SetCurrentProgramScene', {'sceneName': name}))
+
+async def openWSSession(wsTarget):
+    global GLOBAL_WS_SESSION_DICT
+    try:
+        hostName = wsTarget['hostName']
+        ws = WSSession(wsTarget['url'], wsTarget['password'])
+        await ws.open()
+        if hostName in GLOBAL_WS_SESSION_DICT:
+            GLOBAL_WS_SESSION_DICT[hostName].close()
+        GLOBAL_WS_SESSION_DICT[hostName] = ws
+    except (asyncio.exceptions.TimeoutError) as e:
+        print('Error: Could not make websocket connection to:', hostName)
 
 
 
@@ -75,12 +87,10 @@ class WSSession(WebSocketClient):
 type_defs = gql("""
     type Query {
         hello: String!
-        run: Int!
-        test: Test
     }
 
-    type Test {
-        eeee: String!
+    type Mutation {
+        setCurrentScene(hostName: String!, sceneName: String!): Boolean!
     }
 """)
 
@@ -91,26 +101,24 @@ async def resolve_hello(_, info):
     user_agent = request.headers.get("user-agent", "guest")
     return "Hello, %s!" % user_agent
 
-@query.field("run")
-async def resolve_run(_, info):
+mutation = MutationType()
+@mutation.field("setCurrentScene")
+async def resolve_setCurrentScene(_, info, hostName, sceneName):
     if not info.context["request"].user.is_authenticated:
         return 1
-    await GLOBAL_WS_SESSION.setCurrentScene("testScene")
+    try:
+        await GLOBAL_WS_SESSION_DICT[hostName].setCurrentScene(sceneName)
+    except Exception as e:
+        print("Error: Could not set scene", sceneName, "on host", hostName)
+        logging.error(traceback.format_exc())
+        print(e)
+        return 1
     return 0
-
-@query.field("test")
-async def resolve_test(_, info):
-    return "aaaa"
-
-test = ObjectType("Test")
-@test.field("eeee")
-async def resolve_eeee(obj, *_):
-    return obj
 
 
 
 ######## Create executable schema instance
-schema = make_executable_schema(type_defs, query, test)
+schema = make_executable_schema(type_defs, query, mutation)
 routes = [
     Mount('/graphql', GraphQL(schema)),
     Mount('/', app=StaticFiles(directory='.', html=True))
