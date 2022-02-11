@@ -4,3 +4,4 @@ simpleobsws
 ariadne
 uvicorn
 starlette
+motor

@@ -8,7 +8,21 @@ services:
     volumes:
       - ./app:/app
     ports:
-      - "8000:8000"
+      - "8000:8000/tcp"
+    networks:
+      obs-sss:
+  
+  mongodb:
+    container_name: obs-sss_db
+    image: mongo:5.0.6
+    env_file: obs-sss_db.env
+    volumes:
+      - ./db:/db
+      - ./mongo-init.sh:/docker-entrypoint-initdb.d/mongo-init.sh:ro
+    ports:
+      - "27017:27017/tcp"
+    expose:
+      - 27017/tcp
     networks:
       obs-sss:
 

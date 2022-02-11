@@ -14,45 +14,93 @@ from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
+import motor.motor_asyncio
 
 
 
 ######## Global vars
 GLOBAL_WS_SESSION_DICT = {}
 GLOBAL_OBS_SHOW_DICT = {}
+DBCLIENT = None
+DB = None
 
 
 
 ######## Startup and shutdown functions
 async def startup():
-        wsTargetList = json.loads(os.environ['WS_TARGET_LIST'])
-        await asyncio.gather(*map(openWSSession, wsTargetList))
-        await createOBSShows()
+        await dbInit(os.environ['MONGODB_URL'])
+        await loadOBSSessions()
+        await loadAllOBSShows()
 
 async def shutdown():
     for ws in GLOBAL_WS_SESSION_DICT.values():
         await ws.close()
 
-async def openWSSession(wsTarget):
-    global GLOBAL_WS_SESSION_DICT
-    try:
-        hostName = wsTarget['hostName']
-        ws = WSSession(wsTarget['url'], wsTarget['password'])
-        await ws.open()
-        if hostName in GLOBAL_WS_SESSION_DICT:
-            await GLOBAL_WS_SESSION_DICT[hostName].close()
-        GLOBAL_WS_SESSION_DICT[hostName] = ws
-    except (asyncio.exceptions.TimeoutError) as e:
-        print('Error: Could not make websocket connection to:', hostName)
+async def dbInit(connString):
+    global DBCLIENT
+    global DB
+    DBCLIENT = motor.motor_asyncio.AsyncIOMotorClient(connString, serverSelectionTimeoutMS=5000)
 
-async def createOBSShows():
+    try:
+        await DBCLIENT.server_info()
+    except Exception:
+        print("Error: Unable to connect to the mongodb server.")
+
+    DB = DBCLIENT['obs-sss']
+
+async def loadOBSSessions():
+    global GLOBAL_WS_SESSION_DICT
+
+    c = DB['obs_hosts']
+    async for obsHost in c.find({}):
+        try:
+            hostName = obsHost['hostName']
+            ws = WSSession(obsHost['url'], obsHost['password'])
+            await ws.open()
+            if hostName in GLOBAL_WS_SESSION_DICT:
+                await GLOBAL_WS_SESSION_DICT[hostName].close()
+            GLOBAL_WS_SESSION_DICT[hostName] = ws
+        except (asyncio.exceptions.TimeoutError) as e:
+            print('Error: Could not make websocket connection to:', hostName)
+
+async def loadAllOBSShows():
+    c = DB['obs_shows']
+    async for d in c.find({}, {'showName': 1}):
+        await loadOBSShow(d['showName'])
+
+
+
+######## CRUD and loading/unloading
+async def loadOBSShow(showName):
     global GLOBAL_OBS_SHOW_DICT
-    obsShowList = json.loads(os.environ['OBS_SHOW_LIST'])
-    for rawOBSShow in obsShowList:
-        obsShow = OBSShow()
-        for rawOBSState in rawOBSShow['obsStateList']:
-            obsShow.add(OBSState(rawOBSState['hostName'], rawOBSState['sceneName']))
-        GLOBAL_OBS_SHOW_DICT[rawOBSShow['showName']] = obsShow
+
+    c = DB['obs_shows']
+    d = await readOBSShow(showName)
+    obsShow = OBSShow()
+    for rawOBSState in d['obsStateList']:
+        obsShow.add(OBSState(rawOBSState['hostName'], rawOBSState['sceneName']))
+    GLOBAL_OBS_SHOW_DICT[showName] = obsShow
+
+async def unloadOBSShow(showName):
+    global GLOBAL_OBS_SHOW_DICT
+    GLOBAL_OBS_SHOW_DICT.pop(showName)
+
+# Read obs show entry
+async def readOBSShow(showName):
+    c = DB['obs_shows']
+    return await c.find_one({'showName': showName})
+
+# Create or update obs show entry
+async def configureOBSShow():
+    c = DB['obs_shows']
+
+    # Add code
+
+# Delete obs show entry
+async def deleteOBSShow():
+    c = DB['obs_shows']
+
+    # Code
 
 
 
