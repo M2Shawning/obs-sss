@@ -17,7 +17,7 @@ services:
     image: mongo:5.0.6
     env_file: obs-sss_db.env
     volumes:
-      - ./db:/db
+      - ./db:/data/db
       - ./mongo-init.sh:/docker-entrypoint-initdb.d/mongo-init.sh:ro
     ports:
       - "27017:27017/tcp"

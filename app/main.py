@@ -15,6 +15,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Mount
 from starlette.staticfiles import StaticFiles
 import motor.motor_asyncio
+from bson.objectid import ObjectId
 
 
 
@@ -70,37 +71,19 @@ async def loadAllOBSShows():
 
 
 
-######## CRUD and loading/unloading
+######## loading/unloading configs into vars
 async def loadOBSShow(showName):
     global GLOBAL_OBS_SHOW_DICT
 
-    c = DB['obs_shows']
-    d = await readOBSShow(showName)
+    d = await DB['obs_shows'].find_one({'showName': showName})
     obsShow = OBSShow()
-    for rawOBSState in d['obsStateList']:
+    for rawOBSState in d['obsStates']:
         obsShow.add(OBSState(rawOBSState['hostName'], rawOBSState['sceneName']))
     GLOBAL_OBS_SHOW_DICT[showName] = obsShow
 
 async def unloadOBSShow(showName):
     global GLOBAL_OBS_SHOW_DICT
     GLOBAL_OBS_SHOW_DICT.pop(showName)
-
-# Read obs show entry
-async def readOBSShow(showName):
-    c = DB['obs_shows']
-    return await c.find_one({'showName': showName})
-
-# Create or update obs show entry
-async def configureOBSShow():
-    c = DB['obs_shows']
-
-    # Add code
-
-# Delete obs show entry
-async def deleteOBSShow():
-    c = DB['obs_shows']
-
-    # Code
 
 
 
@@ -166,12 +149,43 @@ type_defs = gql("""
     type Query {
         hello: String!
         getShowNames: [String]!
+
+        getOBSShows(id: String): [OBSShowPayload]!
     }
 
     type Mutation {
         setCurrentScene(hostName: String!, sceneName: String!): Boolean!
         executeShow(showName: String!): Boolean!
         reconnectAllWS: Boolean!
+
+        createOBSShow(obsShow: OBSShowInput!): GenericPayload!
+        updateOBSShow(id: String!, obsShow: OBSShowInput!): GenericPayload!
+        deleteOBSShow(id: String!): GenericPayload!
+    }
+
+    type OBSShowPayload {
+        showName: String!
+        obsState: [OBSStatePayload]!
+    }
+
+    type OBSStatePayload {
+        hostName: String!
+        sceneName: String!
+    }
+
+    type GenericPayload {
+        status: String!
+        error: String
+    }
+
+    input OBSShowInput {
+        showName: String!
+        obsStates: [OBSStateInput]!
+    }
+
+    input OBSStateInput {
+        hostName: String!
+        sceneName: String!
     }
 """)
 
@@ -223,6 +237,67 @@ async def resolve_executeShow(_, info):
     wsTargetList = json.loads(os.environ['WS_TARGET_LIST'])
     await asyncio.gather(*map(openWSSession, wsTargetList))
     return 0
+
+#TODO: Can I make all mutations authenticated by checking at the root????????
+#TODO: Add reload show query to load updated config into var
+@mutation.field("createOBSShow")
+async def resolve_createOBSShow(_, info, obsShow):
+    if not info.context["request"].user.is_authenticated:
+        return 1
+
+    try:
+        dict = {
+            "showName": obsShow["showName"],
+            "obsStates": obsShow["obsStates"],
+        }
+        DB['obs_shows'].insert_one(dict)
+
+        return {
+            "status": "Success",
+        }
+    except Exception as error:
+        return {
+            "status": "Failure",
+            "error": error,
+        }
+
+@mutation.field("updateOBSShow")
+async def resolve_updateOBSShow(_, info, id, obsShow):
+    if not info.context["request"].user.is_authenticated:
+        return 1
+
+    try:
+        dict = {
+            "showName": obsShow["showName"],
+            "obsStates": obsShow["obsStates"],
+        }
+        DB['obs_shows'].replace_one({'_id': ObjectId(id)}, dict)
+
+        return {
+            "status": "Success",
+        }
+    except Exception as error:
+        return {
+            "status": "Failure",
+            "error": error,
+        }
+
+@mutation.field("deleteOBSShow")
+async def resolve_deleteOBSShow(_, info, id):
+    if not info.context["request"].user.is_authenticated:
+        return 1
+
+    try:
+        DB['obs_shows'].delete_many({'_id': ObjectId(id)})
+
+        return {
+            "status": "Success",
+        }
+    except Exception as error:
+        return {
+            "status": "Failure",
+            "error": error,
+        }
 
 
 
